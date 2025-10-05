@@ -1,447 +1,603 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Runic Alchemy</title>
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@farcade/game-sdk@0.2.1/dist/index.min.js"></script>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <title>SEA COIN DIVER - Enhanced</title>
+    <script src="https://cdn.jsdelivr.net/npm/@farcade/game-sdk@latest/dist/index.min.js"></script>
     <style>
-      @import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Uncial+Antiqua&display=swap");
-
       html,
       body {
         margin: 0;
         padding: 0;
-        background: linear-gradient(135deg, #1a0833 0%, #2d1b69 50%, #1a0833 100%);
-        width: 100vw;
-        height: 100vh;
-        overflow: hidden;
-        font-family: "Cinzel", serif;
-        -webkit-user-select: none;
-        -ms-user-select: none;
-        user-select: none; /* Disable in-game text selection */
-      }
-      #game-container {
-        width: 100vw;
-        height: 100vh;
-        position: relative;
-        background: radial-gradient(circle at center, rgba(139, 69, 19, 0.1) 0%, rgba(25, 8, 51, 0.9) 100%);
-        -webkit-user-select: none;
-        -ms-user-select: none;
-        user-select: none;
+        background: #0b2d4a;
+        height: 100%;
       }
       canvas {
-        width: 100% !important;
-        height: 100% !important;
-        object-fit: fill !important;
+        display: block;
+        margin: 0 auto;
+        touch-action: none;
       }
     </style>
   </head>
   <body>
-    <div id="game-container"></div>
+    <!-- Phaser CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.0/dist/phaser.min.js"></script>
     <script>
-      window.FarcadeSDK.on("play_again", () => {
-        if (window.gameInstance) {
-          if (window.gameInstance.scene.isActive("GameScene")) {
-            window.gameInstance.scene.stop("GameScene");
+      (() => {
+        const GAME_W = 360;
+        const GAME_H = 640;
+
+        const SURFACE_Y = 80;
+        const SEA_TOP = SURFACE_Y + 10;
+        const SEA_BOTTOM = GAME_H - 30;
+        const COIN_COUNT_TARGET = 18;
+        const RESPAWN_INTERVAL = 2500;
+        const OXYGEN_TANK_CHANCE = 0.1;
+        const GOLD_BASE_CHANCE = 0.05; // 浅瀬での金コイン確率をさらに減らす
+        const GOLD_MAX_CHANCE = 0.75; // 深海での金コイン確率をさらに上げる
+        const OXYGEN_MAX = 100;
+        const OXYGEN_DANGER_THRESHOLD = 30;
+        const OXYGEN_DRAIN_DIVING = 12; // 80%に減速
+        const OXYGEN_DRAIN_UNDERWATER = 4; // 80%に減速
+        const OXYGEN_RECOVER_PER_SEC = 75; // 3倍に加速
+        const OXYGEN_TANK_RECOVERY = 30;
+        const DIVE_SPEED = 84; // 70 * 1.2 = 84
+        const H_DRIFT = 55;
+        const FLOAT_SPEED = -67.2; // -56 * 1.2 = -67.2
+        const TIME_LIMIT = 60;
+        const FEVER_LAST = 10;
+        const FEVER_MULT = 5;
+        const PLAYER_RADIUS = 14;
+
+        let gameInstance = null;
+        let isMuted = false;
+
+        class MainScene extends Phaser.Scene {
+          constructor() {
+            super("main");
           }
-          window.gameInstance.scene.start("TitleScene");
-        }
-      });
 
-      class TitleScene extends Phaser.Scene {
-        constructor() {
-          super({ key: "TitleScene" });
-          this.ingredientIcons = [];
-        }
+          spawnTimeItem() {
+            const x = Phaser.Math.Between(30, GAME_W - 30);
+            const y = Phaser.Math.Between(SEA_TOP + 80, SEA_BOTTOM - 80); // 中間部分に配置
 
-        preload() {
-          // Title logo
-          this.load.image(
-            "hurryLogo",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/hurry_logo-FfLFGyqhMDdL1917SwsGAwrRI6eERV.png?RnhZ",
-          );
+            // 時計アイテムデザイン
+            const timeItem = this.add.graphics();
 
-          // Wizard character
-          this.load.image(
-            "wizard",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/Wizzy_purple-hCtK0iNRLatXlF4h8SLb7Z5zCbX4H1.png?p8zx",
-          );
+            // 外枠（金色）
+            timeItem.lineStyle(3, 0xffd700, 1);
+            timeItem.strokeCircle(0, 0, 12);
 
-          // Alchemy ingredients - updated URLs
-          this.load.image(
-            "rainbow",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/top-o5r9gRgKhgTGZTECbl2i00MA1VBy2E.png?456L",
-          );
-          this.load.image(
-            "thunderEssence",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/bottle_bolt-eD710ihPlHRWNz7rCWa2M1RIceGykC.png?RAIq",
-          );
-          this.load.image(
-            "fireEssence",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/bottle_fire-qDlVroAiHpBOg0i0OtbEJQpz12Q1W0.png?topc",
-          );
-          this.load.image(
-            "waterEssence",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/bottle_water-dVAJ2Hjyg1sPyiQSk34F3gS4ixCT2E.png?6sZS",
-          );
-          this.load.image(
-            "ratTail",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/deadrat-DLchJbQF6L80AOkwfdPKsb7SLpqoTK.png?cdag",
-          );
+            // 内側（白）
+            timeItem.fillStyle(0xffffff);
+            timeItem.fillCircle(0, 0, 10);
 
-          // Customers - all using the same wizard image
-          this.load.image(
-            "customer00",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/Wizzy_purple-hCtK0iNRLatXlF4h8SLb7Z5zCbX4H1.png?p8zx",
-          );
-          this.load.image(
-            "customer01",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/Wizzy_purple-hCtK0iNRLatXlF4h8SLb7Z5zCbX4H1.png?p8zx",
-          );
-          this.load.image(
-            "customer02",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/Wizzy_purple-hCtK0iNRLatXlF4h8SLb7Z5zCbX4H1.png?p8zx",
-          );
-          this.load.image(
-            "customer03",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/Wizzy_purple-hCtK0iNRLatXlF4h8SLb7Z5zCbX4H1.png?p8zx",
-          );
+            // 時計の針
+            timeItem.lineStyle(2, 0x000000, 1);
+            timeItem.lineBetween(0, 0, 0, -6); // 短針（上）
+            timeItem.lineBetween(0, 0, 4, 0); // 長針（右）
 
-          // Reuse some background assets
-          this.load.image(
-            "backgroundImage",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/BASE_wiz-cp7bDQW8qHwbI4KuhbMTmV5Wy1LVVN.png?UGzi",
-          );
+            // 12時の位置にマーク
+            timeItem.fillStyle(0x000000);
+            timeItem.fillCircle(0, -8, 1);
 
-          // Complete images - 4 color variations for sparkling effect
-          this.load.image(
-            "complete01",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/complete01-kiqlVC5wBDUqJYpfcwmRFbKSpT4ESl.png?5DAO",
-          );
-          this.load.image(
-            "complete02",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/complete02-80N6CD2oH5bSmWkfq7VlQVg6dTZdXp.png?ghXn",
-          );
-          this.load.image(
-            "complete03",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/complete03-dwr5me8G4x8nfOK78CDToSMFUTWbZa.png?wGnq",
-          );
-          this.load.image(
-            "complete04",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/complete04-YLOu1oMxVweYVLLYJLoFbQfqDTXltM.png?Ln5r",
-          );
+            timeItem.x = x;
+            timeItem.y = y;
 
-          // Audio
-          this.load.audio(
-            "collectSound",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/kYTGyVr8TG03/get-i1cu5w0mD3gpxNbDW9egTdMvVDVGxg.mp3?weXs",
-          );
-          this.load.audio(
-            "successSound",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/potion-sgtsq9UI2leD4H78mNSsdfLQ78T2Qx.mp3?jkqi",
-          );
-          this.load.audio(
-            "entrySound",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/f904c81e-9b0e-4f33-b6de-7d539ddc6c57/mouse-LC5veCF93XlkKbTYZr1nCiAqJeWvtd.mp3?BVB0",
-          );
+            this.physics.add.existing(timeItem);
+            timeItem.body.setSize(24, 24);
+            timeItem.body.setAllowGravity(false);
+            timeItem.body.setImmovable(true);
+            this.timeItems.add(timeItem);
 
-          // Button click sound
-          this.load.audio(
-            "buttonSound",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/MAGICPOWER-IOXpWWgtYm3yEcSiW9lwhFjfPqGyKY.mp3?eu34",
-          );
-
-          // Check mark for completed ingredients
-          this.load.image(
-            "checkMark",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/check-lrA8lVivNgsd2MeWOFIYtGGcggN3Bf.png?26Wq",
-          );
-
-          // BEGIN button images - 4 color variations for sparkling effect
-          this.load.image(
-            "begin01",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/BEGIN01-qXkgcGdS4S9MH03XG8q57L4fQrk3gr.png?Oi2v",
-          );
-          this.load.image(
-            "begin02",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/BEGIN02-ZyINcObsL8V9GBHG9aOKgyvDMQ8rNt.png?XR7L",
-          );
-          this.load.image(
-            "begin03",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/BEGIN03-Cm5KhyayNGS2edyS4TnS7iipNxDwTT.png?pGxX",
-          );
-          this.load.image(
-            "begin04",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/BEGIN04-x7ygvsIpxB29i6uResL1nyQ5VaJxGR.png?6hZF",
-          );
-
-          // OPEN button images - 4 color variations for sparkling effect
-          this.load.image(
-            "open01",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/OPEN01-W2teJL61sQtW4UE2l38lSja4f2Pkyw.png?je95",
-          );
-          this.load.image(
-            "open02",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/OPEN02-0E6HbgoHqsNgsppnCjp4ytz36Zuoe6.png?jyBW",
-          );
-          this.load.image(
-            "open03",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/OPEN03-8aeJlHUiPzRMFgL6bvruJN2yLk0ZwX.png?bA5T",
-          );
-          this.load.image(
-            "open04",
-            "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/51b97866-ced4-4f48-9c47-c5950616decd/OPEN04-3i0ElBQSjKHiBH7fZcf8FK4CFICdp8.png?1AZd",
-          );
-        }
-
-        create() {
-          // Background with magical atmosphere
-          const bg = this.add.rectangle(360, 640, 720, 1280, 0x1a0833, 1);
-
-          // Add mystical particles
-          this.createMysticalParticles();
-
-          window.FarcadeSDK.on("toggle_mute", (data) => {
-            if (typeof data.isMuted === "boolean") {
-              this.sound.mute = data.isMuted;
-            }
-          });
-
-          // Button sound setup
-          this.buttonSound = this.sound.add("buttonSound");
-
-          // Main title with logo image (80% size, moved down even more)
-          const titleLogo = this.add.image(360, 350, "hurryLogo").setOrigin(0.5).setScale(0.64); // Moved from 280 to 350
-
-          // Animate title with magical glow
-          this.tweens.add({
-            targets: titleLogo,
-            alpha: { from: 0, to: 1 },
-            scale: { from: 0.48, to: 0.64 }, // Adjusted for new scale
-            duration: 1500,
-            ease: "Power2.Out",
-          });
-
-          this.time.delayedCall(1000, () => {
+            // 光る効果（金色）
             this.tweens.add({
-              targets: titleLogo,
-              alpha: { from: 1, to: 0.7 },
-              duration: 2000,
+              targets: timeItem,
+              alpha: { from: 0.6, to: 1.0 },
+              duration: 800,
+              yoyo: true,
+              repeat: -1,
+            });
+          }
+
+          init() {
+            this.resetGameState();
+          }
+
+          resetGameState() {
+            // 基本ゲーム状態
+            this.player = null;
+            this.oxygen = OXYGEN_MAX;
+            this.score = 0;
+            this.timeLeft = TIME_LIMIT;
+            this.isDiving = false;
+            this.pointerX = GAME_W / 2;
+            this.gameOver = false;
+            this.gameStarted = false;
+
+            // UI要素
+            this.feverLabel = null;
+            this.oxyBar = null;
+            this.dangerText = null;
+            this.scoreText = null;
+            this.timeText = null;
+
+            // ゲームオブジェクト
+            this.coins = null;
+            this.oxygenTanks = null;
+            this.timeItems = null; // 時計アイテム
+            this.respawnTimer = null;
+            this.gameTimer = null;
+            this.boat = null;
+            this.scorePopups = null;
+
+            // 音声
+            this.bgm = null;
+            this.coinSE = null;
+            this.itemSE = null;
+            this.alarmSE = null; // 警報音用
+
+            // Tween参照
+            this.playerDangerTween = null;
+            this.playerShakeTween = null;
+            this.dangerTween = null;
+            this.alarmTimer = null; // 警報音タイマー
+
+            // アニメーション関連
+            this.currentDiverFrame = 0;
+            this.diverAnimTimer = null;
+
+            // FEVER TIME管理
+            this.feverShown = false; // FEVER TIME表示済みフラグ
+
+            // FEVER TIME管理
+            this.feverShown = false; // FEVER TIME表示済みフラグ
+          }
+
+          preload() {
+            this.load.image(
+              "boat",
+              "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/35b6b9d9-cfc0-48be-a0a7-b4894f77e466/Logomark-White-vLkN5b6P89vNI4QkiKA4VBgYRyJIKx.png?KE8m",
+            );
+            this.load.image(
+              "diver",
+              "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/35b6b9d9-cfc0-48be-a0a7-b4894f77e466/diver-ZY24MsdqmuCjab553B3gI83rIocNgy.png?arBh",
+            );
+            this.load.image(
+              "diver02",
+              "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/35b6b9d9-cfc0-48be-a0a7-b4894f77e466/diver02-EODuwdFikXceFdJmCTL38aPqXmVQYF.png?kI9E",
+            );
+            this.load.image(
+              "normalCoin",
+              "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/35b6b9d9-cfc0-48be-a0a7-b4894f77e466/coin01-zLXFo0MDsdmUjwbiJc93O6uOqWRLZ1.png?nI0e",
+            );
+            this.load.image(
+              "goldCoin",
+              "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/35b6b9d9-cfc0-48be-a0a7-b4894f77e466/coinGOLD-biTRvfab7UGnugN6bTs5h8957OJQYw.png?SZHj",
+            );
+
+            this.load.audio(
+              "bgm",
+              "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/35b6b9d9-cfc0-48be-a0a7-b4894f77e466/BGMsmall-UsyLjtPpl4mHD0KZSExhNxjaudhHSg.mp3?X9my",
+            );
+            this.load.audio(
+              "coinSound",
+              "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/35b6b9d9-cfc0-48be-a0a7-b4894f77e466/coin-Ee7Eto3VUl0QjQ07rNyn180Er8F7JK.mp3?0eV2",
+            );
+            this.load.audio(
+              "itemSound",
+              "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/35b6b9d9-cfc0-48be-a0a7-b4894f77e466/win-Oe5RXXsUWR9d7NL3wHoG2sQAMkxxPh.mp3?GXxh",
+            );
+
+            this.load.image(
+              "feverImage",
+              "https://lqy3lriiybxcejon.public.blob.vercel-storage.com/35b6b9d9-cfc0-48be-a0a7-b4894f77e466/FEVER-HYOS24ZVv2iOQ69D8Ere60ONreEop0.png?KIw5",
+            );
+          }
+
+          create() {
+            // 完全リセット - 既存の要素をクリア
+            this.tweens.killAll();
+            this.time.removeAllEvents();
+            if (this.children) {
+              this.children.removeAll(true);
+            }
+
+            // 音声設定
+            this.bgm = this.sound.add("bgm", { volume: isMuted ? 0 : 0.3, loop: true });
+            this.coinSE = this.sound.add("coinSound", { volume: isMuted ? 0 : 0.7 });
+            this.itemSE = this.sound.add("itemSound", { volume: isMuted ? 0 : 0.8 });
+            this.alarmSE = this.sound.add("coinSound", { volume: isMuted ? 0 : 0.4, rate: 2.0 }); // 警報音（コイン音を高速化）
+
+            if (!isMuted) this.bgm.play();
+
+            // 背景
+            this.add.rectangle(GAME_W / 2, SURFACE_Y / 2, GAME_W, SURFACE_Y, 0x6ec6ff).setDepth(-10);
+            this.add
+              .rectangle(GAME_W / 2, (GAME_H + SURFACE_Y) / 2, GAME_W, GAME_H - SURFACE_Y, 0x0b2d4a)
+              .setDepth(-10);
+
+            // 海面ライン
+            this.add.line(0, 0, 0, SURFACE_Y, GAME_W, SURFACE_Y, 0xffffff, 0.25).setOrigin(0, 0).setLineWidth(2);
+
+            // ボート
+            this.boat = this.add.image(GAME_W * 0.15, SURFACE_Y - 15, "boat").setScale(0.3);
+
+            // 最深部ライン
+            this.add.rectangle(GAME_W / 2, SEA_BOTTOM + 8, GAME_W, 16, 0x1d4763).setDepth(-8);
+            this.add.line(0, 0, 0, SEA_BOTTOM, GAME_W, SEA_BOTTOM, 0xffffff, 0.15).setOrigin(0, 0);
+
+            // プレイヤー（ダイバー画像）
+            this.player = this.add.image(GAME_W / 2, SURFACE_Y + 40, "diver").setDepth(5);
+            this.player.setScale(0.04); // 26cmの大きな画像を大幅縮小
+            this.physics.add.existing(this.player);
+            this.player.body.setCollideWorldBounds(true);
+            this.player.body.setBounce(0, 0);
+            this.player.body.setAllowGravity(false);
+            // プレイヤーは1.2倍スケールなので当たり判定も調整（少し大きめに）
+            this.player.body.setSize(PLAYER_RADIUS * 3, PLAYER_RADIUS * 3); // より大きく設定
+
+            // ダイバーアニメーション設定
+            this.setupDiverAnimation();
+
+            // グループ
+            this.coins = this.add.group();
+            this.oxygenTanks = this.add.group();
+            this.timeItems = this.add.group(); // 時計アイテム用グループ
+            this.scorePopups = this.add.group();
+
+            // 初期コイン配置
+            for (let i = 0; i < COIN_COUNT_TARGET; i++) {
+              this.spawnCoin();
+            }
+
+            // 初期酸素ボンベ配置（深めの位置に1個）
+            this.spawnOxygenTank(true);
+
+            // UI - 中央上部に酸素メーター
+            this.add
+              .text(GAME_W / 2, 8, "OXYGEN", {
+                fontFamily: "Arial",
+                fontSize: "14px",
+                color: "#ffffff",
+              })
+              .setOrigin(0.5, 0);
+
+            this.add
+              .rectangle(GAME_W / 2 - 70, 26, 140, 12, 0x113a59)
+              .setOrigin(0, 0)
+              .setStrokeStyle(1, 0xffffff, 0.4);
+            this.oxyBar = this.add.rectangle(GAME_W / 2 - 70, 26, 140, 12, 0x59ffa5).setOrigin(0, 0);
+
+            // DANGERテキスト
+            this.dangerText = this.add
+              .text(GAME_W / 2, 42, "DANGER", {
+                fontFamily: "Arial",
+                fontSize: "12px",
+                color: "#ff0000",
+                fontStyle: "bold",
+              })
+              .setOrigin(0.5, 0)
+              .setAlpha(0);
+
+            // スコアと時間をその下に（初期値で設定）
+            this.scoreText = this.add
+              .text(GAME_W / 2 - 50, 60, "SCORE 0", {
+                fontFamily: "Arial",
+                fontSize: "14px",
+                color: "#ffffff",
+              })
+              .setOrigin(0.5, 0);
+
+            this.timeText = this.add
+              .text(GAME_W / 2 + 50, 60, "TIME 60", {
+                fontFamily: "Arial",
+                fontSize: "14px",
+                color: "#ffffff",
+              })
+              .setOrigin(0.5, 0);
+
+            // FEVERラベル（画像に変更）
+            this.feverLabel = this.add
+              .image(GAME_W / 2, GAME_H / 2, "feverImage")
+              .setOrigin(0.5)
+              .setScale(0.14) // 36cmの画像を縮小（0.08から0.14に変更）
+              .setAlpha(0);
+
+            // 入力
+            this.input.on("pointerdown", (p) => {
+              this.isDiving = true;
+              this.pointerX = p.x;
+              this.startGameIfNeeded();
+              if (window.FarcadeSDK) window.FarcadeSDK.singlePlayer.actions.hapticFeedback();
+            });
+            this.input.on("pointermove", (p) => {
+              if (p.isDown) {
+                this.pointerX = p.x;
+              }
+            });
+            this.input.on("pointerup", () => {
+              this.isDiving = false;
+            });
+
+            // ゲームタイマー
+            this.gameTimer = this.time.addEvent({
+              delay: 1000,
+              loop: true,
+              callback: () => {
+                if (this.gameOver || !this.gameStarted) return;
+                this.timeLeft--;
+                if (this.timeLeft < 0) this.timeLeft = 0;
+                this.timeText.setText("TIME " + this.timeLeft);
+
+                if (this.timeLeft <= FEVER_LAST && !this.feverShown) {
+                  this.feverShown = true; // フラグを立てて重複を防ぐ
+
+                  // FEVER TIME画像を表示
+                  this.feverLabel.setAlpha(1);
+                  this.tweens.add({
+                    targets: this.feverLabel,
+                    scale: { from: 0.12, to: 0.16 }, // 0.14を基準に少し大きくなりながら登場
+                    duration: 300,
+                    ease: "Back.easeOut",
+                    onComplete: () => {
+                      // 2秒後にフェードアウト開始
+                      this.time.delayedCall(2000, () => {
+                        this.tweens.add({
+                          targets: this.feverLabel,
+                          alpha: 0,
+                          scale: 0.12,
+                          duration: 500,
+                          ease: "Power2.easeIn",
+                        });
+                      });
+                    },
+                  });
+                }
+
+                if (this.timeLeft === 0) {
+                  this.doGameOver();
+                }
+              },
+            });
+
+            // アイテム再配置タイマー
+            this.respawnTimer = this.time.addEvent({
+              delay: RESPAWN_INTERVAL,
+              loop: true,
+              callback: () => {
+                if (this.gameOver || !this.gameStarted) return;
+
+                // コイン管理
+                if (this.coins.getLength() < COIN_COUNT_TARGET) {
+                  this.spawnCoin();
+                } else if (Math.random() < 0.4) {
+                  this.spawnCoin();
+                }
+
+                // 酸素ボンベ管理（より積極的に）
+                const tankCount = this.oxygenTanks.getLength();
+
+                // 落下中のボンベがあるかチェック
+                const hasFallingTank = this.oxygenTanks.children.entries.some(
+                  (tank) => tank.getData("falling") === true,
+                );
+
+                let spawnChance = 0;
+
+                if (tankCount === 0) {
+                  spawnChance = 0.8; // 0個の時は80%の確率で追加
+                } else if (tankCount === 1) {
+                  spawnChance = 0.5; // 1個の時は50%の確率で追加
+                } else if (tankCount < 3) {
+                  spawnChance = 0.3; // 2個の時は30%の確率で追加
+                }
+
+                // 落下中のボンベがない場合のみ船からの落下を許可
+                if (Math.random() < spawnChance && !hasFallingTank) {
+                  this.spawnOxygenTank(false, true); // 船から落下
+                }
+
+                // 時計アイテム管理（5%の確率でスポーン）
+                if (Math.random() < 0.05 && this.timeItems.getLength() < 1) {
+                  this.spawnTimeItem();
+                }
+              },
+            });
+
+            // コリジョン
+            this.physics.add.overlap(this.player, this.coins, (player, coin) => {
+              this.collectCoin(coin);
+            });
+
+            this.physics.add.overlap(this.player, this.oxygenTanks, (player, tank) => {
+              this.collectOxygenTank(tank);
+            });
+
+            this.physics.add.overlap(this.player, this.timeItems, (player, timeItem) => {
+              this.collectTimeItem(timeItem);
+            });
+
+            this.physics.world.setBounds(0, 0, GAME_W, GAME_H);
+
+            // Farcade SDK
+            if (window.FarcadeSDK) {
+              window.FarcadeSDK.singlePlayer.actions.ready();
+            }
+          }
+
+          setupDiverAnimation() {
+            // ダイバーアニメーション用タイマー（移動中のみ）
+            this.diverAnimTimer = this.time.addEvent({
+              delay: 300, // 0.3秒ごとに切り替え
+              loop: true,
+              callback: () => {
+                if (this.gameOver || !this.gameStarted) return;
+
+                // 移動中のみアニメーション
+                if (this.isDiving || Math.abs(this.player.body.velocity.y) > 10) {
+                  this.currentDiverFrame = 1 - this.currentDiverFrame; // 0と1を切り替え
+                  const texture = this.currentDiverFrame === 0 ? "diver" : "diver02";
+                  this.player.setTexture(texture);
+                }
+              },
+            });
+          }
+
+          startGameIfNeeded() {
+            if (!this.gameStarted) {
+              this.gameStarted = true;
+            }
+          }
+
+          updateDangerState() {
+            const isDanger = this.oxygen <= OXYGEN_DANGER_THRESHOLD;
+
+            if (isDanger) {
+              this.dangerText.setAlpha(1);
+              if (!this.dangerTween) {
+                this.dangerTween = this.tweens.add({
+                  targets: [this.dangerText, this.oxyBar],
+                  alpha: { from: 0.3, to: 1 },
+                  duration: 300,
+                  yoyo: true,
+                  repeat: -1,
+                });
+              }
+              this.oxyBar.setFillStyle(0xff4444);
+
+              // ▼ ここを addCounter を使う方式に変更
+              if (!this.playerDangerTween) {
+                this.playerDangerTween = this.tweens.addCounter({
+                  from: 0,
+                  to: 1,
+                  duration: 200,
+                  yoyo: true,
+                  repeat: -1,
+                  onUpdate: (tw) => {
+                    const phase = tw.getValue(); // 0→1→0…
+                    // 白(255,255,255)→黄(255,255,0)へ青成分を減らす
+                    const blueValue = Math.floor((1 - phase) * 255);
+                    const tintColor = (255 << 16) | (255 << 8) | blueValue;
+                    this.player.setTint(tintColor);
+                  },
+                });
+              }
+
+              if (!this.playerShakeTween) {
+                this.playerShakeTween = this.tweens.add({
+                  targets: this.player,
+                  rotation: { from: -0.1, to: 0.1 },
+                  duration: 80,
+                  yoyo: true,
+                  repeat: -1,
+                  ease: "Sine.easeInOut",
+                });
+              }
+
+              if (!this.alarmTimer) {
+                this.alarmTimer = this.time.addEvent({
+                  delay: 800,
+                  loop: true,
+                  callback: () => {
+                    if (!isMuted && this.oxygen <= OXYGEN_DANGER_THRESHOLD) {
+                      this.alarmSE.play();
+                    }
+                  },
+                });
+              }
+            } else {
+              this.dangerText.setAlpha(0);
+              if (this.dangerTween) {
+                this.dangerTween.destroy();
+                this.dangerTween = null;
+              }
+              if (this.playerDangerTween) {
+                this.playerDangerTween.stop();
+                this.playerDangerTween.remove();
+                this.playerDangerTween = null;
+              }
+              if (this.playerShakeTween) {
+                this.playerShakeTween.stop();
+                this.playerShakeTween.remove();
+                this.playerShakeTween = null;
+              }
+              if (this.alarmTimer) {
+                this.alarmTimer.destroy();
+                this.alarmTimer = null;
+              }
+              this.player.clearTint();
+              this.player.setRotation(0);
+              this.oxyBar.setFillStyle(0x59ffa5);
+            }
+          }
+
+          spawnCoin() {
+            const y = Phaser.Math.Between(SEA_TOP + 20, SEA_BOTTOM - 20);
+            const depthRatio = Phaser.Math.Clamp((y - SEA_TOP) / (SEA_BOTTOM - SEA_TOP), 0, 1);
+            const goldChance = Phaser.Math.Linear(GOLD_BASE_CHANCE, GOLD_MAX_CHANCE, depthRatio);
+            const isGold = Math.random() < goldChance;
+
+            let x,
+              attempts = 0;
+            const playerStartX = GAME_W / 2;
+            const playerStartY = SURFACE_Y + 40;
+            const minPlayerDistance = 60; // プレイヤー初期位置から60ピクセル以上離す
+            const minCoinDistance = 40; // 他のコインから40ピクセル以上離す
+
+            // プレイヤー初期位置と他のコインから十分離れた位置を見つける
+            do {
+              x = Phaser.Math.Between(20, GAME_W - 20);
+
+              // プレイヤーとの距離チェック
+              const playerDistance = Phaser.Math.Distance.Between(x, y, playerStartX, playerStartY);
+              if (playerDistance < minPlayerDistance) {
+                attempts++;
+                continue;
+              }
+
+              // 他のコインとの距離チェック
+              let tooClose = false;
+              this.coins.children.entries.forEach((existingCoin) => {
+                if (existingCoin.active) {
+                  const coinDistance = Phaser.Math.Distance.Between(x, y, existingCoin.x, existingCoin.y);
+                  if (coinDistance < minCoinDistance) {
+                    tooClose = true;
+                  }
+                }
+              });
+
+              if (!tooClose) break;
+              attempts++;
+            } while (attempts < 20); // 無限ループ防止
+
+            const coinImage = isGold ? "goldCoin" : "normalCoin";
+            const scale = isGold ? 0.03 : 0.096; // ノーマルコインを80%に縮小
+
+            const coin = this.add.image(x, y, coinImage).setScale(scale);
+            coin.setData("value", isGold ? 3 : 1); // ゴールドコインを3点に修正
+            coin.setData("gold", isGold);
+
+            this.physics.add.existing(coin);
+            // 実際の表示サイズに合わせた当たり判定
+            if (isGold) {
+              // ゴールドコイン（scale 0.03）- 非常に小さいので少し大きめに
+              coin.body.setSize(12, 12);
+            } else {
+              // ノーマルコイン（scale 0.096）- 小さいので適度に
+              coin.body.setSize(20, 20);
+            }
+            coin.body.setAllowGravity(false);
+            coin.body.setImmovable(true);
+            this.coins.add(coin);
+
+            this.tweens.add({
+              targets: coin,
+              scale: { from: scale * 0.9, to: scale * 1.1 },
+              duration: 700,
               yoyo: true,
               repeat: -1,
               ease: "Sine.easeInOut",
             });
-          });
-
-          // Instructions with mystical styling (moved down even further)
-          const instruction1 = this.add
-            .text(360, 690, "Gather all mystical ingredients shown", {
-              fontFamily: "Cinzel, serif",
-              fontSize: "24px",
-              fill: "#e6d7ff",
-              align: "center",
-              wordWrap: { width: 600 },
-              shadow: {
-                offsetX: 1,
-                offsetY: 1,
-                color: "#000000",
-                blur: 2,
-                fill: true,
-              },
-            })
-            .setOrigin(0.5);
-
-          const instruction2 = this.add
-            .text(360, 740, "to brew powerful potions for your clients!", {
-              fontFamily: "Cinzel, serif",
-              fontSize: "24px",
-              fill: "#e6d7ff",
-              align: "center",
-              wordWrap: { width: 600 },
-              shadow: {
-                offsetX: 1,
-                offsetY: 1,
-                color: "#000000",
-                blur: 2,
-                fill: true,
-              },
-            })
-            .setOrigin(0.5);
-
-          [instruction1, instruction2].forEach((text, index) => {
-            text.setAlpha(0);
-            this.tweens.add({
-              targets: text,
-              alpha: 1,
-              duration: 1000,
-              delay: 500 + index * 200,
-              ease: "Power1",
-            });
-          });
-
-          // Mystical start button (moved down even further) - now with sparkling images
-          const startButton = this.createSparklingButton(360, 890, "begin", () => {
-            this.buttonSound.play();
-            this.scene.start("GameScene");
-          });
-
-          // Display ingredient icons at bottom (moved down even further)
-          const ingredientsToDisplay = ["fireEssence", "waterEssence", "thunderEssence"];
-          const spacing = 150; // Increased spacing for better center alignment
-          const startX = 360 - (spacing * (ingredientsToDisplay.length - 1)) / 2; // Center alignment
-          const yPosition = 1090; // Moved down from 1020
-
-          ingredientsToDisplay.forEach((ing, index) => {
-            let icon = this.add.image(startX + index * spacing, yPosition, ing).setScale(6.24); // 4.8 * 1.3 = 6.24
-            this.ingredientIcons.push(icon);
-
-            // Add magical shimmer effect
-            this.time.delayedCall(index * 200, () => {
-              this.tweens.add({
-                targets: icon,
-                alpha: { from: 0.7, to: 1 },
-                scale: { from: 6.24, to: 7.28 }, // 5.6 * 1.3 = 7.28
-                duration: 800,
-                yoyo: true,
-                repeat: -1,
-                ease: "Sine.easeInOut",
-              });
-            });
-          });
-
-          window.FarcadeSDK.singlePlayer.actions.ready();
-        }
-
-        createMysticalParticles() {
-          for (let i = 0; i < 20; i++) {
-            const particle = this.add.circle(
-              Phaser.Math.Between(0, 720),
-              Phaser.Math.Between(0, 1280),
-              Phaser.Math.Between(1, 3),
-              0xe6b800,
-              0.6,
-            );
-
-            this.tweens.add({
-              targets: particle,
-              alpha: { from: 0.6, to: 0.1 },
-              scale: { from: 1, to: 0.3 },
-              duration: Phaser.Math.Between(2000, 4000),
-              yoyo: true,
-              repeat: -1,
-              delay: Phaser.Math.Between(0, 2000),
-            });
           }
-        }
-
-        createMysticalButton(x, y, text, callback) {
-          const buttonBg = this.add.rectangle(x, y, 300, 60, 0x4a0e4e, 1);
-          buttonBg.setStrokeStyle(2, 0xe6b800);
-
-          const buttonText = this.add
-            .text(x, y, text, {
-              fontFamily: "Cinzel, serif",
-              fontSize: "24px",
-              fill: "#e6b800",
-              fontStyle: "bold",
-            })
-            .setOrigin(0.5);
-
-          buttonBg.setInteractive();
-          buttonBg.on("pointerdown", callback);
-          buttonBg.on("pointerover", () => {
-            buttonBg.setFillStyle(0x6b1470);
-            this.tweens.add({
-              targets: buttonText,
-              scale: 1.1,
-              duration: 100,
-            });
-          });
-          buttonBg.on("pointerout", () => {
-            buttonBg.setFillStyle(0x4a0e4e);
-            this.tweens.add({
-              targets: buttonText,
-              scale: 1.0,
-              duration: 100,
-            });
-          });
-
-          return { bg: buttonBg, text: buttonText };
-        }
-
-        createSparklingButton(x, y, imagePrefix, callback) {
-          // Create sparkling button with color cycling
-          const buttonImages = [`${imagePrefix}01`, `${imagePrefix}02`, `${imagePrefix}03`, `${imagePrefix}04`];
-          let currentImageIndex = 0;
-
-          // Different scales for different buttons
-          const scale = imagePrefix === "open" ? 0.64 : 0.8; // 80% for OPEN, keep BEGIN at 0.8
-
-          const buttonImage = this.add.image(x, y, buttonImages[0]).setOrigin(0.5).setScale(scale).setInteractive();
-
-          // Color cycling animation for sparkling effect
-          const colorCycleTimer = this.time.addEvent({
-            delay: 200, // Change color every 200ms
-            callback: () => {
-              currentImageIndex = (currentImageIndex + 1) % buttonImages.length;
-              buttonImage.setTexture(buttonImages[currentImageIndex]);
-            },
-            loop: true,
-          });
-
-          // Button interactions
-          buttonImage.on("pointerdown", () => {
-            callback();
-          });
-
-          buttonImage.on("pointerover", () => {
-            this.tweens.add({
-              targets: buttonImage,
-              scale: scale + 0.05,
-              duration: 100,
-            });
-          });
-
-          buttonImage.on("pointerout", () => {
-            this.tweens.add({
-              targets: buttonImage,
-              scale: scale,
-              duration: 100,
-            });
-          });
-
-          return { image: buttonImage, timer: colorCycleTimer };
-        }
-      }
-
-      class GameScene extends Phaser.Scene {
-        constructor() {
-          super({ key: "GameScene" });
-          this.countdownText = null;
-          this.previousCustomerKey = null;
-          this.skipSoundOnRestart = false;
-        }
-
-        init(data) {
-          this.startImmediately = data?.startImmediately || false;
-
-          this.skipSoundOnRestart = data?.skipSound || false;
-          this.potionsBrewed = 0;
-          this.gameStarted = false;
-          this.isGameOver = false;
-          this.brewedPotion = [];
-          this.requiredIngredients = []; // Track what ingredients are needed
-          this.isProcessingSuccess = false;
-          this.isCollecting = false; // Add flag to prevent double collection
-          this.playableAreaTop = 280;
-
-          this.ingredientGroup = null;
-          this.brewedPotionIcons = null;
-          this.orderIcons = [];
-
-          this.timeLeft = 60;
-          this.characterSpeed = 332;
-        }
